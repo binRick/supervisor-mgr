@@ -301,11 +301,3 @@ func loadConfig(filePath string) {
 		log.Fatal(err)
 	}
 }
-
-func main() {
-	//loadConfig("config.yaml")
-
-	if _, err := parser.Parse(); err != nil {
-		log.Fatal(err)
-	}
-}
