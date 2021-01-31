@@ -14,6 +14,7 @@ require (
 	github.com/ochinchina/supervisord v0.6.3
 	github.com/rogpeppe/go-charset v0.0.0-20180617210344-2471d30d28b4 // indirect
 	github.com/sevlyar/go-daemon v0.1.4 // indirect
-	github.com/sirupsen/logrus v1.4.1 // indirect
+	github.com/sirupsen/logrus v1.4.1
+	github.com/tidwall/sjson v1.1.5
 	gopkg.in/yaml.v2 v2.2.2
 )
