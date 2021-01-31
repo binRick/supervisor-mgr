@@ -1,16 +1,18 @@
 package main
 
 import (
+    "encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jessevdk/go-flags"
 	"github.com/ochinchina/supervisord/xmlrpcclient"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
-	"log"
 	"os"
 	"text/tabwriter"
 	"time"
+    "github.com/tidwall/sjson"
+    log "github.com/sirupsen/logrus"
 )
 
 type options struct {
@@ -20,6 +22,31 @@ type options struct {
 
 var o options
 var writer *tabwriter.Writer
+
+func GetJSONString(obj interface{}, ignoreFields ...string) (string, error) {
+    toJson, err := json.Marshal(obj)
+    if err != nil {
+        return "", err
+    }
+
+    if len(ignoreFields) == 0 {
+        return string(toJson), nil
+    }
+
+    toMap := map[string]interface{}{}
+    json.Unmarshal([]byte(string(toJson)), &toMap)
+
+    for _, field := range ignoreFields {
+        delete(toMap, field)
+    }
+
+    toJson, err = json.Marshal(toMap)
+    if err != nil {
+        return "", err
+    }
+
+    return string(toJson), nil
+}
 
 func init() {
 	o.Config = func(s string) {
@@ -38,6 +65,14 @@ var (
 	errServerAndProcessNameAreNeeded = errors.New("server and process name are needed")
 )
 
+type ServiceState struct {
+    Name    string
+    State   string
+    Pid     int
+    Started_ts int64
+    Uptime_seconds int64
+}
+
 func getXmlRPCClient(sInfo *ServerInfo) *xmlrpcclient.XmlRPCClient {
 	c := xmlrpcclient.NewXmlRPCClient(sInfo.Url, true)
 	c.SetTimeout(30 * time.Second)
@@ -45,6 +80,46 @@ func getXmlRPCClient(sInfo *ServerInfo) *xmlrpcclient.XmlRPCClient {
 	c.SetPassword(sInfo.Password)
 
 	return c
+}
+
+func printStatusJson(sInfo *ServerInfo) error {
+    status_json, err := getStatusJson(sInfo)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(status_json)
+    return nil
+}
+
+func getStatusJson(sInfo *ServerInfo) (string, error) {
+    stripped_status, _ := GetJSONString(`{}`)
+	c := getXmlRPCClient(sInfo)
+	pInfo, err := c.GetAllProcessInfo()
+    stripped_status, _ = sjson.Set(stripped_status, "server_name", sInfo.Name)
+    services := []ServiceState{}
+    NOW_TS := int64(time.Now().UnixNano() / int64(time.Millisecond) / 1000)
+    stripped_status, _ = sjson.Set(stripped_status, "now_ts", NOW_TS)
+	if err != nil {
+		fmt.Println(err.Error())
+		return "", err
+	} else {
+		for _, info := range pInfo.Value {
+            Uptime_seconds := 0
+            if info.Start > 0 {
+                Uptime_seconds = int(NOW_TS - int64(info.Start))
+            }
+            service := ServiceState{
+              Name: info.Name,
+              State: info.Statename,
+              Pid: info.Pid,
+              Started_ts: int64(info.Start),
+              Uptime_seconds: int64(Uptime_seconds),
+            }
+            services = append(services, service)
+		}
+        stripped_status, _ = sjson.Set(stripped_status, "services", services)
+		return stripped_status, nil
+	}
 }
 
 func printStatus(sInfo *ServerInfo) error {
@@ -114,6 +189,21 @@ func executeOnServer(names []string, continueWhenError bool, f func(sInfo *Serve
 	return nil
 }
 
+type cmdStatusJson struct {
+}
+
+func (*cmdStatusJson) Execute(args []string) error {
+	if len(args) > 0 {
+		return executeOnServer(args, true, func(sInfo *ServerInfo) error {
+			return printStatusJson(sInfo)
+		})
+	} else {
+		for _, info := range cfg.Servers {
+			_ = printStatusJson(info)
+		}
+	}
+	return nil
+}
 type cmdStatus struct {
 }
 
@@ -171,6 +261,10 @@ func init() {
 		"show process status: supervisor-mgr status [serverName...]",
 		"",
 		&cmdStatus{})
+	_, _ = parser.AddCommand("status_json",
+		"show process status: supervisor-mgr status_json [serverName...]",
+		"",
+		&cmdStatusJson{})
 	_, _ = parser.AddCommand("start",
 		"start process on server: supervisor-mgr start serverName processName[processName...]",
 		"",
